@@ -2,9 +2,9 @@ import csv
 import os
 import sys
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
-VERSION = "1.0"
+VERSION = "1.1"
 
 def get_base_dir():
     if getattr(sys, 'frozen', False):
@@ -27,8 +27,6 @@ def load_authenticator_csv(path):
                         results[email] = []
                     if secret not in results[email]:
                         results[email].append(secret)
-    except FileNotFoundError:
-        pass
     except Exception as e:
         print(f"Error reading authenticator CSV: {e}")
     return results
@@ -54,11 +52,21 @@ def load_recover_csv(path):
                         results[email] = []
                     if secret not in results[email]:
                         results[email].append(secret)
-    except FileNotFoundError:
-        pass
     except Exception as e:
         print(f"Error reading recover CSV: {e}")
     return results
+
+def find_csv_files(base):
+    auth_path = None
+    recover_path = None
+    for f in os.listdir(base):
+        fl = f.lower()
+        if fl.endswith('.csv'):
+            if 'authenticator' in fl:
+                auth_path = os.path.join(base, f)
+            elif 'recover' in fl or 'merged' in fl:
+                recover_path = os.path.join(base, f)
+    return auth_path, recover_path
 
 class App:
     def __init__(self):
@@ -67,44 +75,47 @@ class App:
         self.root.configure(bg='#1a1a2e')
         self.root.resizable(False, False)
 
-        w, h = 520, 460
+        w, h = 520, 500
         sx = (self.root.winfo_screenwidth() - w) // 2
         sy = (self.root.winfo_screenheight() - h) // 2
         self.root.geometry(f'{w}x{h}+{sx}+{sy}')
 
-        base = get_base_dir()
         self.auth_data = {}
         self.recover_data = {}
+        self.auth_path = None
+        self.recover_path = None
 
-        auth_path = None
-        recover_path = None
-        for f in os.listdir(base):
-            fl = f.lower()
-            if 'authenticator' in fl and fl.endswith('.csv'):
-                auth_path = os.path.join(base, f)
-            elif ('recover' in fl or 'merged' in fl) and fl.endswith('.csv'):
-                recover_path = os.path.join(base, f)
+        self._build_ui()
+        self._try_load_csvs()
 
-        status_parts = []
-        if auth_path:
-            self.auth_data = load_authenticator_csv(auth_path)
-            status_parts.append(f"Authenticator: {sum(len(v) for v in self.auth_data.values())} keys")
-        else:
-            status_parts.append("Authenticator CSV: NOT FOUND")
-
-        if recover_path:
-            self.recover_data = load_recover_csv(recover_path)
-            status_parts.append(f"Recover: {sum(len(v) for v in self.recover_data.values())} keys")
-        else:
-            status_parts.append("Recover CSV: NOT FOUND")
-
+    def _build_ui(self):
         title = tk.Label(self.root, text="Secret Key Lookup", font=('Segoe UI', 16, 'bold'),
                          bg='#1a1a2e', fg='white')
         title.pack(pady=(16, 4))
 
-        status = tk.Label(self.root, text=" | ".join(status_parts), font=('Segoe UI', 9),
-                          bg='#1a1a2e', fg='#6b7280')
-        status.pack(pady=(0, 12))
+        self.status_lbl = tk.Label(self.root, text="Loading...", font=('Segoe UI', 9),
+                                    bg='#1a1a2e', fg='#6b7280')
+        self.status_lbl.pack(pady=(0, 8))
+
+        btn_frame = tk.Frame(self.root, bg='#1a1a2e')
+        btn_frame.pack(padx=20, fill='x')
+
+        self.load_auth_btn = tk.Button(btn_frame, text="Load Authenticator CSV",
+                                        font=('Segoe UI', 9), bg='#16213e', fg='#a5b4fc',
+                                        activebackground='#1e3a5f', activeforeground='white',
+                                        relief='flat', cursor='hand2', padx=8, pady=2,
+                                        command=self._pick_auth_csv)
+        self.load_auth_btn.pack(side='left', padx=(0, 4))
+
+        self.load_rec_btn = tk.Button(btn_frame, text="Load Recover CSV",
+                                       font=('Segoe UI', 9), bg='#16213e', fg='#a5b4fc',
+                                       activebackground='#1e3a5f', activeforeground='white',
+                                       relief='flat', cursor='hand2', padx=8, pady=2,
+                                       command=self._pick_recover_csv)
+        self.load_rec_btn.pack(side='left')
+
+        sep = tk.Frame(self.root, bg='#374151', height=1)
+        sep.pack(fill='x', padx=20, pady=(8, 8))
 
         input_frame = tk.Frame(self.root, bg='#1a1a2e')
         input_frame.pack(padx=20, fill='x')
@@ -145,11 +156,55 @@ class App:
         self.result_text.tag_configure('success', foreground='#4ade80', font=('Segoe UI', 10, 'bold'))
         self.result_text.tag_configure('divider', foreground='#374151')
 
-        hint = tk.Label(self.root, text="Place both CSV files in the same folder as this EXE",
+        hint = tk.Label(self.root, text="Place CSV files next to the EXE, or use the Load buttons above",
                         font=('Segoe UI', 8), bg='#1a1a2e', fg='#4b5563')
         hint.pack(pady=(4, 8))
 
         self.email_entry.focus_set()
+
+    def _try_load_csvs(self):
+        base = get_base_dir()
+        auth_path, recover_path = find_csv_files(base)
+
+        if auth_path:
+            self.auth_data = load_authenticator_csv(auth_path)
+            self.auth_path = auth_path
+        if recover_path:
+            self.recover_data = load_recover_csv(recover_path)
+            self.recover_path = recover_path
+
+        self._update_status()
+
+    def _update_status(self):
+        parts = []
+        if self.auth_data:
+            parts.append(f"Auth: {sum(len(v) for v in self.auth_data.values())} keys")
+        else:
+            parts.append("Auth: not loaded")
+        if self.recover_data:
+            parts.append(f"Recover: {sum(len(v) for v in self.recover_data.values())} keys")
+        else:
+            parts.append("Recover: not loaded")
+
+        total = len(self.auth_data) + len(self.recover_data)
+        color = '#4ade80' if total > 0 else '#f87171'
+        self.status_lbl.configure(text=" | ".join(parts), fg=color)
+
+    def _pick_auth_csv(self):
+        path = filedialog.askopenfilename(title="Select Authenticator CSV",
+                                           filetypes=[("CSV files", "*.csv")])
+        if path:
+            self.auth_data = load_authenticator_csv(path)
+            self.auth_path = path
+            self._update_status()
+
+    def _pick_recover_csv(self):
+        path = filedialog.askopenfilename(title="Select Recover CSV",
+                                           filetypes=[("CSV files", "*.csv")])
+        if path:
+            self.recover_data = load_recover_csv(path)
+            self.recover_path = path
+            self._update_status()
 
     def do_search(self):
         email = self.email_var.get().strip().lower()
@@ -158,6 +213,13 @@ class App:
 
         self.result_text.configure(state='normal')
         self.result_text.delete('1.0', 'end')
+
+        if not self.auth_data and not self.recover_data:
+            self.result_text.insert('end', "No CSV files loaded!\n\n", 'error')
+            self.result_text.insert('end', "Use the 'Load' buttons above to select your\n", 'source')
+            self.result_text.insert('end', "Authenticator and/or Recover CSV files.", 'source')
+            self.result_text.configure(state='disabled')
+            return
 
         auth_keys = self.auth_data.get(email, [])
         recover_keys = self.recover_data.get(email, [])
@@ -181,7 +243,7 @@ class App:
         if not all_keys:
             self.result_text.insert('end', f"No secret keys found for:\n", 'error')
             self.result_text.insert('end', f"{email}\n\n", 'key')
-            self.result_text.insert('end', "Make sure the email is correct and the CSV files\nare in the same folder as this EXE.", 'source')
+            self.result_text.insert('end', "Check that the email is correct.", 'source')
         else:
             self.result_text.insert('end', f"Found {len(all_keys)} secret key(s) for:\n", 'success')
             self.result_text.insert('end', f"{email}\n", 'header')
